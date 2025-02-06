@@ -23,15 +23,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initial_state = selected_orbit.initial_state();
 
     let t0 = 0.0;
-    let tf = 86400.0;
-    let dt = 1e-2;
+    let tf = 86400.0 * 1000.0;
+    let dt = 60f64;
 
     let problem = KeplerProblem;
     let yoshida_solver = YoshidaSolver::new(problem);
     let rk4 = RK4;
     let dp45 = DP45 {
-        max_step_iter: 1000,
-        max_step_size: 10.0 * dt,
+        max_step_iter: 100,
+        max_step_size: 2.0 * dt,
         min_step_size: 1e-3 * dt,
         safety_factor: 0.9,
         tol: 1e-3,
