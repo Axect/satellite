@@ -1,4 +1,4 @@
-import pandas as pd
+import polars as pl
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -9,7 +9,7 @@ R_EARTH = 6378.137  # Radius of Earth in km
 J2 = 1.08262668e-3  # J2 coefficient of Earth
 
 # Import parquet file
-df = pd.read_parquet('test.parquet')
+df = pl.read_parquet('test.parquet')
 t = df['Epoch (UTC)']
 x = np.array(df['x (km)'])[:]
 y = np.array(df['y (km)'])[:]

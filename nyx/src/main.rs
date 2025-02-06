@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sc_dynamics = SpacecraftDynamics::from_model(orbital_dynamics, arc_no_dyn);
 
-    let prop_time = 1.0 * Unit::Day;
+    let prop_time = 1000.0 * Unit::Day;
 
     let setup = Propagator::rk89(
         sc_dynamics.clone(),
