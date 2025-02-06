@@ -27,52 +27,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dt = 60.0;
 
     let problem = KeplerProblem;
-    let gl4 = GL4 {
-        solver: ImplicitSolver::FixedPoint,
-        tol: 1e-10,
-        max_step_iter: 1000,
-    };
+    let yoshida_solver = YoshidaSolver::new(problem);
     let rk4 = RK4;
+    let dp45 = DP45 {
+        max_step_iter: 1000,
+        max_step_size: 2.0 * dt,
+        min_step_size: 1e-3 * dt,
+        safety_factor: 0.9,
+        tol: 1e-3,
+    };
 
-    let gl4_solver = BasicODESolver::new(gl4);
     let rk4_solver = BasicODESolver::new(rk4);
+    let dp45_solver = BasicODESolver::new(dp45);
 
     let y0 = Vec::from(initial_state);
     y0.print();
-    let (t, y_gl4) = gl4_solver.solve(
+    let (t_yoshida, y_yoshida) = yoshida_solver.solve(
+        (t0, tf),
+        dt,
+        &y0,
+    )?;
+    let (t_rk4, y_rk4) = rk4_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
-    let (_, y_rk4) = rk4_solver.solve(
+    let (t_dp45, y_dp45) = dp45_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
 
-    let y_gl4 = py_matrix(y_gl4);
+    let y_yoshida = py_matrix(y_yoshida);
     let y_rk4 = py_matrix(y_rk4);
+    let y_dp45 = py_matrix(y_dp45);
 
     let mut df = DataFrame::new(vec![]);
-    df.push("t", Series::new(t));
-    df.push("x_gl4", Series::new(y_gl4.col(0)));
-    df.push("y_gl4", Series::new(y_gl4.col(1)));
-    df.push("z_gl4", Series::new(y_gl4.col(2)));
-    df.push("vx_gl4", Series::new(y_gl4.col(3)));
-    df.push("vy_gl4", Series::new(y_gl4.col(4)));
-    df.push("vz_gl4", Series::new(y_gl4.col(5)));
+    df.push("t_yoshida", Series::new(t_yoshida));
+    df.push("x_yoshida", Series::new(y_yoshida.col(0)));
+    df.push("y_yoshida", Series::new(y_yoshida.col(1)));
+    df.push("z_yoshida", Series::new(y_yoshida.col(2)));
+    df.push("vx_yoshida", Series::new(y_yoshida.col(3)));
+    df.push("vy_yoshida", Series::new(y_yoshida.col(4)));
+    df.push("vz_yoshida", Series::new(y_yoshida.col(5)));
+    df.print();
+    df.write_parquet("data_yoshida.parquet", CompressionOptions::Uncompressed)?;
+
+    let mut df = DataFrame::new(vec![]);
+    df.push("t_rk4", Series::new(t_rk4));
     df.push("x_rk4", Series::new(y_rk4.col(0)));
     df.push("y_rk4", Series::new(y_rk4.col(1)));
     df.push("z_rk4", Series::new(y_rk4.col(2)));
     df.push("vx_rk4", Series::new(y_rk4.col(3)));
     df.push("vy_rk4", Series::new(y_rk4.col(4)));
     df.push("vz_rk4", Series::new(y_rk4.col(5)));
-
     df.print();
+    df.write_parquet("data_rk4.parquet", CompressionOptions::Uncompressed)?;
 
-    df.write_parquet("data.parquet", CompressionOptions::Uncompressed)?;
+    let mut df = DataFrame::new(vec![]);
+    df.push("t_dp45", Series::new(t_dp45));
+    df.push("x_dp45", Series::new(y_dp45.col(0)));
+    df.push("y_dp45", Series::new(y_dp45.col(1)));
+    df.push("z_dp45", Series::new(y_dp45.col(2)));
+    df.push("vx_dp45", Series::new(y_dp45.col(3)));
+    df.push("vy_dp45", Series::new(y_dp45.col(4)));
+    df.push("vz_dp45", Series::new(y_dp45.col(5)));
+    df.print();
+    df.write_parquet("data_dp45.parquet", CompressionOptions::Uncompressed)?;
 
     Ok(())
 }
@@ -270,23 +293,13 @@ pub fn perifocal_to_eci_matrix(orbit: &Orbit) -> Matrix {
     R3_raan * R1_i * R3_w
 }
 
+#[allow(unused)]
 pub struct YoshidaSolver {
     problem: KeplerProblem,
 }
 
 const W0: f64 = -1.7024143839193153;
 const W1: f64 = 1.3512071919596578;
-
-const YOSHIDA_COEFF: [f64; 8] = [
-    W1 / 2f64,
-    (W0 + W1) / 2f64,
-    (W0 + W1) / 2f64,
-    W1 / 2f64,
-    W1,
-    W0,
-    W1,
-    0f64,
-];
 
 impl YoshidaSolver {
     pub fn new(problem: KeplerProblem) -> Self {
@@ -300,8 +313,6 @@ impl YoshidaSolver {
         dt: f64,
         initial_condition: &[f64],
     ) -> anyhow::Result<(Vec<f64>, Vec<Vec<f64>>)> {
-        let kepler = &self.problem;
-
         let t_vec = linspace(
             t_span.0,
             t_span.1,
@@ -309,29 +320,58 @@ impl YoshidaSolver {
         );
         let state_dim = initial_condition.len();
         let pos_dim = state_dim / 2;
-        let vel_dim = pos_dim;
         let pos_init = &initial_condition[..pos_dim];
         let vel_init = &initial_condition[pos_dim..];
+
         let mut state_vec = vec![vec![0f64; state_dim]; t_vec.len()];
-        let mut q_vec = vec![vec![0f64; pos_dim]; t_vec.len()];
-        let mut p_vec = vec![vec![0f64; vel_dim]; t_vec.len()];
         state_vec[0] = initial_condition.to_vec();
-        q_vec[0] = pos_init.to_vec();
-        p_vec[0] = vel_init.to_vec();
+
+        let c: [f64; 4] = [W1 / 2.0, (W0 + W1) / 2.0, (W0 + W1) / 2.0, W1 / 2.0];
+        let d: [f64; 3] = [W1, W0, W1];
+
+        let mut q = pos_init.to_vec();
+        let mut p = vel_init.to_vec();
+
+        let acceleration = |q: &[f64]| -> Vec<f64> {
+            let r = q.iter().map(|&qi| qi * qi).sum::<f64>().sqrt();
+            let r3 = r * r * r;
+            q.iter().map(|&qi| -MU * qi / r3).collect::<Vec<f64>>()
+        };
 
         for i in 1..t_vec.len() {
-            let mut q = q_vec[i - 1].to_vec();
-            let mut p = p_vec[i - 1].to_vec();
-            for j in 0..4 {
-                let deriv = kepler.calc_deriv(&State::from(concat(&q, &p)));
-                for k in 0..pos_dim {
-                    q[k] += YOSHIDA_COEFF[j] * dt * deriv[k];
-                    p[k] += YOSHIDA_COEFF[j + 4] * dt * deriv[k + pos_dim];
-                }
+            // Step 1: Drift with c[0]
+            for k in 0..pos_dim {
+                q[k] += c[0] * dt * p[k];
             }
+            // Step 2: Kick with d[0]
+            let a = acceleration(&q);
+            for k in 0..pos_dim {
+                p[k] += d[0] * dt * a[k];
+            }
+            // Step 3: Drift with c[1]
+            for k in 0..pos_dim {
+                q[k] += c[1] * dt * p[k];
+            }
+            // Step 4: Kick with d[1]
+            let a = acceleration(&q);
+            for k in 0..pos_dim {
+                p[k] += d[1] * dt * a[k];
+            }
+            // Step 5: Drift with c[2]
+            for k in 0..pos_dim {
+                q[k] += c[2] * dt * p[k];
+            }
+            // Step 6: Kick with d[2]
+            let a = acceleration(&q);
+            for k in 0..pos_dim {
+                p[k] += d[2] * dt * a[k];
+            }
+            // Step 7: Drift with c[3]
+            for k in 0..pos_dim {
+                q[k] += c[3] * dt * p[k];
+            }
+
             state_vec[i] = concat(&q, &p);
-            q_vec[i] = q;
-            p_vec[i] = p;
         }
 
         Ok((t_vec, state_vec))
