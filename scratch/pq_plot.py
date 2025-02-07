@@ -52,6 +52,7 @@ pparam = dict(
 # Plot Energy
 with plt.style.context(["science", "nature"]):
     fig, ax = plt.subplots()
+    ax.set(**pparam)
     ax.plot(t_yoshida, E_yoshida, label='Yoshida', color='blue', alpha=0.5)
     ax.plot(t_rk4, E_rk4, label='RK4', color='red', linestyle='--', alpha=0.5)
     ax.plot(t_dp45, E_dp45, label='DP45', color='green', linestyle='-.', alpha=0.5)
