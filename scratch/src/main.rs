@@ -19,102 +19,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .interact()
         .unwrap();
 
-    let selected_orbit = orbits[selection].create_orbit();
+    let selected_orbit_type = orbits[selection];
+    let selected_orbit = selected_orbit_type.create_orbit();
     let initial_state = selected_orbit.initial_state();
 
+    let perturbations = vec![
+        "None",
+        "J2",
+    ];
+    let selection = Select::new()
+        .with_prompt("Select perturbation")
+        .items(&perturbations)
+        .default(0)
+        .interact()
+        .unwrap();
+    let is_perturbed = selection == 1;
+
     let t0 = 0.0;
-    let tf = 86400.0 * 1000.0;
+    let tf = 86400.0 * 100000.0;
     let dt = 60f64;
 
-    let problem = KeplerProblem;
+    let problem = KeplerProblem {
+        is_perturbed,
+    };
     let yoshida_solver = YoshidaSolver::new(problem);
     let rk4 = RK4;
     let dp45 = DP45 {
-        max_step_iter: 100,
+        max_step_iter: 1000,
         max_step_size: 2.0 * dt,
         min_step_size: 1e-3 * dt,
         safety_factor: 0.9,
-        tol: 1e-3,
+        tol: 1e-1,
+    };
+    let gl4 = GL4 {
+        solver: ImplicitSolver::Broyden,
+        tol: 1e-12,
+        max_step_iter: 100,
     };
 
-    let rk4_solver = BasicODESolver::new(rk4);
-    let dp45_solver = BasicODESolver::new(dp45);
+    let rk4_solver = CompactODESolver::new(rk4);
+    let dp45_solver = CompactODESolver::new(dp45);
+    let gl4_solver = CompactODESolver::new(gl4);
 
     let y0 = Vec::from(initial_state);
-    y0.print();
     let (t_yoshida, y_yoshida) = yoshida_solver.solve(
         (t0, tf),
         dt,
         &y0,
     )?;
+    let y_yoshida = py_matrix(y_yoshida);
+    save_data(t_yoshida, y_yoshida, "yoshida", is_perturbed)?;
+
     let (t_rk4, y_rk4) = rk4_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
+    let y_rk4 = py_matrix(y_rk4);
+    save_data(t_rk4, y_rk4, "rk4", is_perturbed)?;
+
+
     let (t_dp45, y_dp45) = dp45_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
-
-    let y_yoshida = py_matrix(y_yoshida);
-    let y_rk4 = py_matrix(y_rk4);
     let y_dp45 = py_matrix(y_dp45);
+    save_data(t_dp45, y_dp45, "dp45", is_perturbed)?;
 
-    let mut df = DataFrame::new(vec![]);
-    df.push("t_yoshida", Series::new(t_yoshida));
-    df.push("x_yoshida", Series::new(y_yoshida.col(0)));
-    df.push("y_yoshida", Series::new(y_yoshida.col(1)));
-    df.push("z_yoshida", Series::new(y_yoshida.col(2)));
-    df.push("vx_yoshida", Series::new(y_yoshida.col(3)));
-    df.push("vy_yoshida", Series::new(y_yoshida.col(4)));
-    df.push("vz_yoshida", Series::new(y_yoshida.col(5)));
-    df.print();
-    df.write_parquet("data_yoshida.parquet", CompressionOptions::Uncompressed)?;
-
-    let mut df = DataFrame::new(vec![]);
-    df.push("t_rk4", Series::new(t_rk4));
-    df.push("x_rk4", Series::new(y_rk4.col(0)));
-    df.push("y_rk4", Series::new(y_rk4.col(1)));
-    df.push("z_rk4", Series::new(y_rk4.col(2)));
-    df.push("vx_rk4", Series::new(y_rk4.col(3)));
-    df.push("vy_rk4", Series::new(y_rk4.col(4)));
-    df.push("vz_rk4", Series::new(y_rk4.col(5)));
-    df.print();
-    df.write_parquet("data_rk4.parquet", CompressionOptions::Uncompressed)?;
-
-    let mut df = DataFrame::new(vec![]);
-    df.push("t_dp45", Series::new(t_dp45));
-    df.push("x_dp45", Series::new(y_dp45.col(0)));
-    df.push("y_dp45", Series::new(y_dp45.col(1)));
-    df.push("z_dp45", Series::new(y_dp45.col(2)));
-    df.push("vx_dp45", Series::new(y_dp45.col(3)));
-    df.push("vy_dp45", Series::new(y_dp45.col(4)));
-    df.push("vz_dp45", Series::new(y_dp45.col(5)));
-    df.print();
-    df.write_parquet("data_dp45.parquet", CompressionOptions::Uncompressed)?;
+    let (t_gl4, y_gl4) = gl4_solver.solve(
+        &problem,
+        (t0, tf),
+        dt,
+        &y0,
+    )?;
+    let y_gl4 = py_matrix(y_gl4);
+    save_data(t_gl4, y_gl4, "gl4", is_perturbed)?;
 
     Ok(())
 }
 
+fn save_data(t: Vec<f64>, result: Matrix, model: &str, is_perturbed: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut df = DataFrame::new(vec![]);
+    df.push("t", Series::new(t));
+    df.push("x", Series::new(result.col(0)));
+    df.push("y", Series::new(result.col(1)));
+    df.push("z", Series::new(result.col(2)));
+    df.push("vx", Series::new(result.col(3)));
+    df.push("vy", Series::new(result.col(4)));
+    df.push("vz", Series::new(result.col(5)));
+    df.print();
+    let filename = format!("data_{}_{}.parquet", model, if is_perturbed { "J2" } else { "2BD" });
+    df.write_parquet(&filename, CompressionOptions::Uncompressed)
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct KeplerProblem;
+pub struct KeplerProblem {
+    is_perturbed: bool,
+}
 
 impl KeplerProblem {
     pub fn calc_deriv(&self, state: &State) -> Vec<f64> {
         let r = state.r();
+        let r2 = r * r;
         let r3 = r.powi(3);
+        let r5 = r.powi(5);
+
+        let (j2_x, j2_y, j2_z) = if self.is_perturbed {
+            let factor = 1.5 * J2 * MU * R_EARTH * R_EARTH / r5;
+            (
+                factor * state.x * (5.0 * state.z * state.z / r2 - 1.0),
+                factor * state.y * (5.0 * state.z * state.z / r2 - 1.0),
+                factor * state.z * (5.0 * state.z * state.z / r2 - 3.0)
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        };
 
         vec![
             state.vx,
             state.vy,
             state.vz,
-            -MU * state.x / r3,
-            -MU * state.y / r3,
-            -MU * state.z / r3,
+            -MU * state.x / r3 + j2_x,
+            -MU * state.y / r3 + j2_y,
+            -MU * state.z / r3 + j2_z,
         ]
     }
 }
@@ -122,17 +152,52 @@ impl KeplerProblem {
 impl ODEProblem for KeplerProblem {
     fn rhs(&self, _t: f64, y: &[f64], dy: &mut [f64]) -> anyhow::Result<()> {
         let state = State::from(y.to_vec());
-        let r = state.r();
-        let r3 = r.powi(3);
 
-        dy[0] = state.vx;
-        dy[1] = state.vy;
-        dy[2] = state.vz;
-        dy[3] = -MU * state.x / r3;
-        dy[4] = -MU * state.y / r3;
-        dy[5] = -MU * state.z / r3;
+        let deriv = self.calc_deriv(&state);
+        dy.copy_from_slice(&deriv);
 
         Ok(())
+    }
+}
+
+pub struct CompactODESolver<I: ODEIntegrator> {
+    integrator: I,
+}
+
+impl<I: ODEIntegrator> CompactODESolver<I> {
+    pub fn new(integrator: I) -> Self {
+        CompactODESolver { integrator }
+    }
+}
+
+impl<I: ODEIntegrator> ODESolver for CompactODESolver<I> {
+    fn solve<P: ODEProblem>(
+            &self,
+            problem: &P,
+            t_span: (f64, f64),
+            dt: f64,
+            initial_conditions: &[f64],
+        ) -> anyhow::Result<(Vec<f64>, Vec<Vec<f64>>)> {
+        let mut t = t_span.0;
+        let mut dt = dt;
+        let mut y = initial_conditions.to_vec();
+        let mut t_vec = vec![t];
+        let mut y_vec = vec![y.clone()];
+
+        let mut count = 1usize;
+        while t < t_span.1 {
+            let dt_step = self.integrator.step(problem, t, &mut y, dt)?;
+            t += dt;
+            dt = dt_step;
+
+            if count % 100 == 0 {
+                t_vec.push(t);
+                y_vec.push(y.clone());
+            }
+            count += 1;
+        }
+
+        Ok((t_vec, y_vec))
     }
 }
 
@@ -171,6 +236,7 @@ impl From<State> for Vec<f64> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum OrbitType {
     LEO,
     GEO,
@@ -313,18 +379,15 @@ impl YoshidaSolver {
         dt: f64,
         initial_condition: &[f64],
     ) -> anyhow::Result<(Vec<f64>, Vec<Vec<f64>>)> {
-        let t_vec = linspace(
-            t_span.0,
-            t_span.1,
-            ((t_span.1 - t_span.0) / dt) as usize + 1,
-        );
+        let total_steps = ((t_span.1 - t_span.0) / dt) as usize + 1;
+
         let state_dim = initial_condition.len();
         let pos_dim = state_dim / 2;
         let pos_init = &initial_condition[..pos_dim];
         let vel_init = &initial_condition[pos_dim..];
 
-        let mut state_vec = vec![vec![0f64; state_dim]; t_vec.len()];
-        state_vec[0] = initial_condition.to_vec();
+        let mut t_vec = vec![t_span.0];
+        let mut state_vec = vec![initial_condition.to_vec()];
 
         let c: [f64; 4] = [W1 / 2.0, (W0 + W1) / 2.0, (W0 + W1) / 2.0, W1 / 2.0];
         let d: [f64; 3] = [W1, W0, W1];
@@ -338,7 +401,7 @@ impl YoshidaSolver {
             q.iter().map(|&qi| -MU * qi / r3).collect::<Vec<f64>>()
         };
 
-        for i in 1..t_vec.len() {
+        for i in 1..total_steps {
             // Step 1: Drift with c[0]
             for k in 0..pos_dim {
                 q[k] += c[0] * dt * p[k];
@@ -371,9 +434,11 @@ impl YoshidaSolver {
                 q[k] += c[3] * dt * p[k];
             }
 
-            state_vec[i] = concat(&q, &p);
+            if i % 100 == 0 {
+                t_vec.push(t_span.0 + i as f64 * dt);
+                state_vec.push(concat(&q, &p));
+            }
         }
-
         Ok((t_vec, state_vec))
     }
 }
