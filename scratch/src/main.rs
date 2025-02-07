@@ -1,5 +1,6 @@
 use peroxide::fuga::*;
 use dialoguer::Select;
+use std::time::Instant;
 
 pub const MU: f64 = 398600.4418;    // Standard gravitational parameter of Earth
 pub const R_EARTH: f64 = 6378.137;  // Radius of Earth in km
@@ -62,39 +63,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gl4_solver = CompactODESolver::new(gl4);
 
     let y0 = Vec::from(initial_state);
+
+    let yoshida_start = Instant::now();
     let (t_yoshida, y_yoshida) = yoshida_solver.solve(
         (t0, tf),
         dt,
         &y0,
     )?;
+    let yoshida_elapsed = yoshida_start.elapsed();
+    println!("Yoshida elapsed: {:?}", yoshida_elapsed);
     let y_yoshida = py_matrix(y_yoshida);
     save_data(t_yoshida, y_yoshida, "yoshida", is_perturbed)?;
 
+    let rk4_start = Instant::now();
     let (t_rk4, y_rk4) = rk4_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
+    let rk4_elapsed = rk4_start.elapsed();
+    println!("RK4 elapsed: {:?}", rk4_elapsed);
     let y_rk4 = py_matrix(y_rk4);
     save_data(t_rk4, y_rk4, "rk4", is_perturbed)?;
 
-
+    let dp45_start = Instant::now();
     let (t_dp45, y_dp45) = dp45_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
+    let dp45_elapsed = dp45_start.elapsed();
+    println!("DP45 elapsed: {:?}", dp45_elapsed);
     let y_dp45 = py_matrix(y_dp45);
     save_data(t_dp45, y_dp45, "dp45", is_perturbed)?;
 
+    let gl4_start = Instant::now();
     let (t_gl4, y_gl4) = gl4_solver.solve(
         &problem,
         (t0, tf),
         dt,
         &y0,
     )?;
+    let gl4_elapsed = gl4_start.elapsed();
+    println!("GL4 elapsed: {:?}", gl4_elapsed);
     let y_gl4 = py_matrix(y_gl4);
     save_data(t_gl4, y_gl4, "gl4", is_perturbed)?;
 
