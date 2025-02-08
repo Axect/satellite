@@ -408,10 +408,16 @@ impl YoshidaSolver {
         let mut q = pos_init.to_vec();
         let mut p = vel_init.to_vec();
 
-        let acceleration = |q: &[f64]| -> Vec<f64> {
-            let r = q.iter().map(|&qi| qi * qi).sum::<f64>().sqrt();
-            let r3 = r * r * r;
-            q.iter().map(|&qi| -MU * qi / r3).collect::<Vec<f64>>()
+        let acceleration = |q: &[f64], p: &[f64]| {
+            let state = State {
+                x: q[0],
+                y: q[1],
+                z: q[2],
+                vx: p[0],
+                vy: p[1],
+                vz: p[2],
+            };
+            self.problem.calc_deriv(&state)[pos_dim..].to_vec()
         };
 
         for i in 1..total_steps {
@@ -420,7 +426,7 @@ impl YoshidaSolver {
                 q[k] += c[0] * dt * p[k];
             }
             // Step 2: Kick with d[0]
-            let a = acceleration(&q);
+            let a = acceleration(&q, &p);
             for k in 0..pos_dim {
                 p[k] += d[0] * dt * a[k];
             }
@@ -429,7 +435,7 @@ impl YoshidaSolver {
                 q[k] += c[1] * dt * p[k];
             }
             // Step 4: Kick with d[1]
-            let a = acceleration(&q);
+            let a = acceleration(&q, &p);
             for k in 0..pos_dim {
                 p[k] += d[1] * dt * a[k];
             }
@@ -438,7 +444,7 @@ impl YoshidaSolver {
                 q[k] += c[2] * dt * p[k];
             }
             // Step 6: Kick with d[2]
-            let a = acceleration(&q);
+            let a = acceleration(&q, &p);
             for k in 0..pos_dim {
                 p[k] += d[2] * dt * a[k];
             }

@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 dialoguer = "0.11.0"
-peroxide = { version = "0.39.0", features = ["parquet"] }
+peroxide = { path = "../../Peroxide", features = ["parquet"] }

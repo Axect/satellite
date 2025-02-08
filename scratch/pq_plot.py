@@ -56,6 +56,6 @@ with plt.style.context(["science", "nature"]):
     ax.plot(t_yoshida, E_yoshida, label='Yoshida', color='blue', alpha=0.5)
     ax.plot(t_rk4, E_rk4, label='RK4', color='red', linestyle='--', alpha=0.5)
     ax.plot(t_dp45, E_dp45, label='DP45', color='green', linestyle='-.', alpha=0.5)
-    ax.plot(t_gl4, E_gl4, label='GL4', color='orange', linestyle='-', alpha=0.5)
+    #ax.plot(t_gl4, E_gl4, label='GL4', color='orange', linestyle='-', alpha=0.5)
     ax.legend()
     fig.savefig(f'plot_energy_{dynamics}.png', dpi=600, bbox_inches='tight')
